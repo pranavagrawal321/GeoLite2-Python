@@ -1,0 +1,61 @@
+#!/bin/bash
+set -e
+
+# This script requires env var $GITHUB_PUSH_TOKEN to be set
+if [ -z "${GITHUB_PUSH_TOKEN}" ]; then
+  echo "Need \$GITHUB_PUSH_TOKEN"
+  exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+cd "$REPO_ROOT"
+
+echo "Installing filter-repo..."
+git config --global advice.detachedHead false
+
+if [ ! -d git-filter-repo ]; then
+  git clone --depth 1 --branch v2.34.0 https://github.com/newren/git-filter-repo.git
+fi
+
+export PATH="$PWD/git-filter-repo:$PATH"
+
+echo "Cloning a clean state..."
+rm -rf clone
+git clone . clone
+cd clone
+
+echo "Updating redistribution..."
+
+editions=(
+  "GeoLite2-ASN"
+  "GeoLite2-Country"
+  "GeoLite2-City"
+)
+
+did_update_anything=0
+
+for edition in "${editions[@]}"; do
+  ./geolite2/scripts/update-databases "$edition" && did_update_anything=1 || true
+done
+
+echo -e "\n\033[1mAll databases processed\033[0m"
+
+# Never fail CI when nothing changed
+if [ "$did_update_anything" -eq 1 ]; then
+  echo "At least one database updated"
+else
+  echo "No updates available"
+  exit 0
+fi
+
+echo "New repo size:"
+du -sh .git
+
+echo "Re-adding origin after history rewrite..."
+git remote remove origin 2>/dev/null || true
+git remote add origin "https://x-access-token:${GITHUB_PUSH_TOKEN}@github.com/pranavagrawal321/GeoLite2-Python.git"
+
+echo "Pushing..."
+git push --force origin master

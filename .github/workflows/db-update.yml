@@ -1,0 +1,29 @@
+name: Databases Updater
+
+on:
+  schedule:
+    - cron: '0 0 * * 0/2'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: do not push updates to repo'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  update_dbs:
+    name: Update MaxMind databases in redistribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x ./geolite2/scripts/ci-cron
+      - run: chmod +x ./geolite2/scripts/clean-git-objects
+      - run: chmod +x ./geolite2/scripts/commit-database
+      - run: chmod +x ./geolite2/scripts/update-databases
+      - run: ./geolite2/scripts/ci-cron
+        env:
+          GITHUB_PUSH_TOKEN: ${{ secrets.GH_FORCE_PUSH }}
+          MAXMIND_ACCOUNT_ID: ${{ secrets.MAXMIND_ACCOUNT_ID }}
+          MAXMIND_LICENSE_KEY: ${{ secrets.MAXMIND_LICENSE_KEY }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}

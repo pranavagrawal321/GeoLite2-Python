@@ -1,0 +1,36 @@
+#!/bin/bash
+set -e
+
+database_name="$1"
+
+if [ -z "$database_name" ]; then
+  echo "Usage: clean-git-objects <database-name>"
+  exit 1
+fi
+
+# Resolve repo root safely
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+cd "$REPO_ROOT"
+
+echo "Cleaning git objects for database ${database_name}..."
+echo "=========="
+
+echo "Before:"
+du -sh .git
+
+git filter-repo \
+  --invert-paths \
+  --path-glob "geolite2/data/${database_name}.tar.gz" \
+  --force
+
+git for-each-ref --format="delete %(refname)" refs/original | git update-ref --stdin
+git reflog expire --expire=now --all
+git gc --prune=now
+
+echo "After:"
+du -sh .git
+
+echo "=========="
+echo "Done cleaning git objects"

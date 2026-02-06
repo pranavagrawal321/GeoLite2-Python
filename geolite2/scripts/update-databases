@@ -1,0 +1,97 @@
+#!/bin/bash
+set -euo pipefail
+
+# Resolve script + repo paths safely
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DATA_DIR="$REPO_ROOT/geolite2/data"
+
+# Required env vars
+: "${MAXMIND_ACCOUNT_ID:?Need \$MAXMIND_ACCOUNT_ID}"
+: "${MAXMIND_LICENSE_KEY:?Need \$MAXMIND_LICENSE_KEY}"
+
+mkdir -p "$DATA_DIR"
+cd "$DATA_DIR"
+
+editions=(
+  GeoLite2-ASN
+  GeoLite2-Country
+  GeoLite2-City
+)
+
+did_update_anything=0
+
+for edition in "${editions[@]}"; do
+  echo -e "\nDownloading checksum for latest version of ${edition}..."
+
+  curl -s -L -u "${MAXMIND_ACCOUNT_ID}:${MAXMIND_LICENSE_KEY}" \
+    "https://download.maxmind.com/geoip/databases/${edition}/download?suffix=tar.gz.sha256" \
+    -o "${edition}.tar.gz.remote.sha256"
+
+  if [ -f "${edition}.tar.gz.sha256" ]; then
+    echo "Checking against current version..."
+
+    remote="$(awk '{print $1}' "${edition}.tar.gz.remote.sha256")"
+    local="$(cat "${edition}.tar.gz.sha256")"
+
+    echo "Remote: ${remote}"
+    echo "Local:  ${local}"
+
+    if [ "$remote" = "$local" ]; then
+      echo -e "\033[32;1m${edition} is already up to date\033[0m"
+      rm -f "${edition}.tar.gz.remote.sha256"
+      continue
+    else
+      echo "Update available!"
+    fi
+  fi
+
+  echo "Cleaning previous version from git history..."
+  "$SCRIPT_DIR/clean-git-objects" "${edition}"
+
+  echo "Downloading ${edition}..."
+  curl -s -L -u "${MAXMIND_ACCOUNT_ID}:${MAXMIND_LICENSE_KEY}" \
+    "https://download.maxmind.com/geoip/databases/${edition}/download?suffix=tar.gz" \
+    -o "${edition}.tar.gz"
+
+  echo "Verifying checksum..."
+  remote="$(awk '{print $1}' "${edition}.tar.gz.remote.sha256")"
+  local="$(shasum -a 256 "${edition}.tar.gz" | awk '{print $1}')"
+
+  echo "Remote: ${remote}"
+  echo "Local:  ${local}"
+
+  if [ "$remote" != "$local" ]; then
+    echo -e "\033[31;1mChecksum mismatch for ${edition}\033[0m"
+    exit 1
+  fi
+
+  rm -f "${edition}.tar.gz.remote.sha256"
+  echo "${local}" > "${edition}.tar.gz.sha256"
+
+  echo "Extracting database..."
+  tar -zxf "${edition}.tar.gz" --wildcards '*.mmdb' --strip-components 1
+
+  echo "Calculating database checksum for redistribution..."
+  calculated="$(shasum -a 384 "${edition}.mmdb" | awk '{print $1}')"
+  echo "New checksum: ${calculated}"
+  echo "${calculated}" > "${edition}.mmdb.sha384"
+
+  did_update_anything=1
+
+  echo "Committing update..."
+  "$SCRIPT_DIR/commit-database" "${edition}"
+
+  echo -e "\033[32;1mDatabase ${edition} successfully updated\033[0m"
+done
+
+echo -e "\n\033[1mAll databases processed\033[0m"
+
+# Never fail CI when nothing changed
+if [ "$did_update_anything" -eq 1 ]; then
+  echo "At least one database updated"
+else
+  echo "No updates available"
+fi
+
+exit 0

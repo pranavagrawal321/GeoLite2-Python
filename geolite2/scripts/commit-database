@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+database_name="$1"
+
+if [ -z "$database_name" ]; then
+  echo "Usage: commit-database <database-name>"
+  exit 1
+fi
+
+# Resolve repo root safely
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+cd "$REPO_ROOT"
+
+echo "Writing commit for database ${database_name}..."
+echo "=========="
+
+git status
+
+if git diff --cached --quiet; then
+  echo "No changes to commit for ${database_name}"
+  exit 0
+fi
+
+git commit -m "GeoLite2: update database ${database_name} - cron job $(date -u +%Y-%m-%d)"
+
+echo "=========="
+echo "Commit written"
